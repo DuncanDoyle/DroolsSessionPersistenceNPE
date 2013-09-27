@@ -1,0 +1,16 @@
+package org.jboss.ddoyle.brms.cep.ha.management
+
+import org.jboss.ddoyle.brms.cep.ha.fact.SimpleFact;
+
+declare SimpleFact
+    @role( event )
+    @timestamp( timestamp )
+end
+
+rule "SimpleFactTimeWindow"
+when
+	$s1: SimpleFact() from entry-point LinkyStream
+	$s2: SimpleFact(this != $s1, this after [0s, 10s] $s1) from entry-point LinkyStream
+then
+	System.out.println("Rule fired, found 2 Facts within the time window.");
+end
