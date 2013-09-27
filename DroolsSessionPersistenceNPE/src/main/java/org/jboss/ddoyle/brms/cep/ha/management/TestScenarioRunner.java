@@ -13,10 +13,12 @@ import org.drools.core.ClockType;
 import org.drools.core.io.impl.ClassPathResource;
 import org.drools.core.time.SessionPseudoClock;
 import org.jboss.ddoyle.brms.cep.ha.fact.SimpleFact;
+import org.kie.api.KieBaseConfiguration;
 import org.kie.api.KieServices;
 import org.kie.api.builder.KieBuilder;
 import org.kie.api.builder.KieFileSystem;
 import org.kie.api.builder.KieModule;
+import org.kie.api.conf.EventProcessingOption;
 import org.kie.api.event.rule.AfterMatchFiredEvent;
 import org.kie.api.event.rule.AgendaEventListener;
 import org.kie.api.event.rule.MatchCreatedEvent;
@@ -29,6 +31,8 @@ import org.kie.api.runtime.KieSessionConfiguration;
 import org.kie.api.runtime.conf.ClockTypeOption;
 import org.kie.api.runtime.rule.EntryPoint;
 import org.mockito.Mockito;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 /**
@@ -37,6 +41,8 @@ import org.mockito.Mockito;
  * @author <a href="mailto:duncan.doyle@redhat.com">Duncan Doyle</a>
  */
 public class TestScenarioRunner {
+	
+	private static final Logger LOGGER = LoggerFactory.getLogger(TestScenarioRunner.class);
 	
 	private static final String kieSessionFileName = "/tmp/brms-cep.sks";
 
@@ -61,10 +67,11 @@ public class TestScenarioRunner {
 		 * @throws IOException
 		 */
 		KieSession kieSession = getKieSessionWithPseudoClock("kiesessionloadertest/simpleFactWithTimeWindow.drl");
+		
 
 		SessionPseudoClock sessionClock = (SessionPseudoClock) kieSession.getSessionClock();
 		// PseudoClock starts at 0 and counts in ms ....
-		System.out.println("Current time of the PseudoClock: " + sessionClock.getCurrentTime());
+		LOGGER.info("Current time of the PseudoClock: " + sessionClock.getCurrentTime());
 
 		// Use Mockito to Mock a WorkingMemoryEventListener and AgendaEventListener ....
 		AgendaEventListener agendaEventListener = Mockito.mock(AgendaEventListener.class);
@@ -75,8 +82,10 @@ public class TestScenarioRunner {
 		EntryPoint entryPoint = kieSession.getEntryPoint(DEFAULT_STREAM);
 
 		// Advance the clock to the time of our fact ...
-		sessionClock.advanceTime(testFactOne.getTimestamp(), TimeUnit.MILLISECONDS);
-
+		long advanceClock = testFactOne.getTimestamp() - sessionClock.getCurrentTime();
+		LOGGER.info("Advancing PseudoClock with " + advanceClock + " milliseconds.");
+		sessionClock.advanceTime(advanceClock, TimeUnit.MILLISECONDS);
+		
 		// Insert the fact.
 		entryPoint.insert(testFactOne);
 
@@ -92,7 +101,7 @@ public class TestScenarioRunner {
 
 		// persist the session and reload
 
-		System.out.println("File location: " + kieSessionFile.getCanonicalPath());
+		LOGGER.info("File location: " + kieSessionFile.getCanonicalPath());
 		KieSessionLoader loader = new FileKieSessionLoader(kieSessionFile);
 
 		loader.save(kieSession);
@@ -121,10 +130,11 @@ public class TestScenarioRunner {
 
 		// Advance the clock to the time of the event.
 		SessionPseudoClock loadedSessionClock = loadedKieSession.getSessionClock();
+		LOGGER.info("Time of the PseudoClock after loading session: " + loadedSessionClock.getCurrentTime());
 		long advanceClock = testFactTwo.getTimestamp() - loadedSessionClock.getCurrentTime();
+		LOGGER.info("Advancing PseudoClock with " + advanceClock + " milliseconds.");
 		loadedSessionClock.advanceTime(advanceClock, TimeUnit.MILLISECONDS);
-		System.out.println("Current time of the PseudoClock: " + loadedSessionClock.getCurrentTime());
-
+		
 		// Insert the fact.
 		EntryPoint loadedEntryPoint = loadedKieSession.getEntryPoint(DEFAULT_STREAM);
 		loadedEntryPoint.insert(testFactTwo);
@@ -143,6 +153,7 @@ public class TestScenarioRunner {
 		KieServices kieServices = KieServices.Factory.get();
 		KieSessionConfiguration config = kieServices.newKieSessionConfiguration();
 		config.setOption(ClockTypeOption.get(ClockType.PSEUDO_CLOCK.getId()));
+		//config.setOption(EventProcessingOption.STREAM);
 		return getKieSession(drlFileClasspath, config);
 	}
 
@@ -152,14 +163,19 @@ public class TestScenarioRunner {
 		Resource simpleDrlResource = new ClassPathResource(drlFileClasspath);
 		kieFileSystem.write(simpleDrlResource);
 		KieBuilder kieBuilder = kieServices.newKieBuilder(kieFileSystem);
-
+		
 		KieModule kieModule = kieBuilder.getKieModule();
+		
 		KieContainer kieContainer = kieServices.newKieContainer(kieModule.getReleaseId());
+			LOGGER.info("Generated KieModule releaseId: " + kieModule.getReleaseId().getGroupId() + ":" + kieModule.getReleaseId().getArtifactId() + ":" + kieModule.getReleaseId().getVersion());
+		
+		KieBaseConfiguration kieBaseConfiguration = kieServices.newKieBaseConfiguration();
+		kieBaseConfiguration.setOption(EventProcessingOption.STREAM);
 
 		if (kieSessionConfiguration != null) {
-			return kieContainer.newKieSession(kieSessionConfiguration);
+			return kieContainer.newKieBase(kieBaseConfiguration).newKieSession(kieSessionConfiguration, null);
 		} else {
-			return kieContainer.newKieSession();
+			return kieContainer.newKieBase(kieBaseConfiguration).newKieSession();
 		}
 	}
 }
